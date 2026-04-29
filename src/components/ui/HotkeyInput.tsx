@@ -147,6 +147,7 @@ export interface HotkeyInputProps {
   disabled?: boolean;
   autoFocus?: boolean;
   validate?: (hotkey: string) => string | null | undefined;
+  hotkeySlot?: string;
 }
 
 function mapKeyboardEventToHotkey(e: KeyboardEvent): string | null {
@@ -188,6 +189,7 @@ export function HotkeyInput({
   autoFocus = false,
   variant = "default",
   validate,
+  hotkeySlot = "dictation",
 }: HotkeyInputProps & HotkeyInputVariant) {
   const { t } = useTranslation();
   const [isCapturing, setIsCapturing] = useState(false);
@@ -401,19 +403,19 @@ export function HotkeyInput({
       setIsCapturing(true);
       setValidationWarning(null);
       clearFnHeld();
-      window.electronAPI?.setHotkeyListeningMode?.(true);
+      window.electronAPI?.setHotkeyListeningMode?.(true, null, hotkeySlot);
     }
-  }, [disabled, clearFnHeld]);
+  }, [disabled, clearFnHeld, hotkeySlot]);
 
   const handleBlur = useCallback(() => {
     setIsCapturing(false);
     setActiveModifiers(new Set());
     setValidationWarning(null);
     clearFnHeld();
-    window.electronAPI?.setHotkeyListeningMode?.(false, lastCapturedHotkeyRef.current);
+    window.electronAPI?.setHotkeyListeningMode?.(false, lastCapturedHotkeyRef.current, hotkeySlot);
     lastCapturedHotkeyRef.current = null;
     onBlur?.();
-  }, [onBlur, clearFnHeld]);
+  }, [onBlur, clearFnHeld, hotkeySlot]);
 
   useEffect(() => {
     if (autoFocus && containerRef.current) {
@@ -423,10 +425,10 @@ export function HotkeyInput({
 
   useEffect(() => {
     return () => {
-      window.electronAPI?.setHotkeyListeningMode?.(false, null);
+      window.electronAPI?.setHotkeyListeningMode?.(false, null, hotkeySlot);
       if (warningTimeoutRef.current) clearTimeout(warningTimeoutRef.current);
     };
-  }, []);
+  }, [hotkeySlot]);
 
   useEffect(() => {
     if (!isCapturing || !isMac) return;

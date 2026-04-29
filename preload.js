@@ -293,8 +293,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
   updateHotkey: (hotkey) => ipcRenderer.invoke("update-hotkey", hotkey),
   registerQuickNoteHotkey: (hotkey) => ipcRenderer.invoke("register-quick-note-hotkey", hotkey),
   saveQuickNoteKey: (hotkey) => ipcRenderer.invoke("save-quick-note-key", hotkey),
-  setHotkeyListeningMode: (enabled, newHotkey) =>
-    ipcRenderer.invoke("set-hotkey-listening-mode", enabled, newHotkey),
+  setHotkeyListeningMode: (enabled, newHotkey, hotkeySlot) =>
+    ipcRenderer.invoke("set-hotkey-listening-mode", enabled, newHotkey, hotkeySlot),
   getHotkeyModeInfo: () => ipcRenderer.invoke("get-hotkey-mode-info"),
   startWindowDrag: () => ipcRenderer.invoke("start-window-drag"),
   stopWindowDrag: () => ipcRenderer.invoke("stop-window-drag"),

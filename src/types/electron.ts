@@ -788,7 +788,8 @@ declare global {
       updateHotkey: (key: string) => Promise<{ success: boolean; message: string }>;
       setHotkeyListeningMode?: (
         enabled: boolean,
-        newHotkey?: string | null
+        newHotkey?: string | null,
+        hotkeySlot?: string
       ) => Promise<{ success: boolean }>;
       getHotkeyModeInfo?: () => Promise<{
         isUsingGnome: boolean;

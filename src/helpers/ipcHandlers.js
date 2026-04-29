@@ -2038,213 +2038,223 @@ class IPCHandlers {
       return await this.windowManager.updateHotkey(hotkey);
     });
 
-    ipcMain.handle("set-hotkey-listening-mode", async (event, enabled, newHotkey = null) => {
-      this.windowManager.setHotkeyListeningMode(enabled);
-      const hotkeyManager = this.windowManager.hotkeyManager;
+    ipcMain.handle(
+      "set-hotkey-listening-mode",
+      async (event, enabled, newHotkey = null, hotkeySlot = "dictation") => {
+        this.windowManager.setHotkeyListeningMode(enabled);
+        const hotkeyManager = this.windowManager.hotkeyManager;
 
-      // When exiting capture mode with a new hotkey, use that to avoid reading stale state
-      const effectiveHotkey = !enabled && newHotkey ? newHotkey : hotkeyManager.getCurrentHotkey();
+        // Only dictation owns the primary native listener. Other slots have their
+        // own callbacks/listeners and must not overwrite the dictation hotkey.
+        const captureSlot = hotkeySlot || "dictation";
+        const effectiveHotkey =
+          !enabled && captureSlot === "dictation" && newHotkey
+            ? newHotkey
+            : hotkeyManager.getCurrentHotkey();
 
-      const {
-        isGlobeLikeHotkey,
-        isModifierOnlyHotkey,
-        isRightSideModifier,
-      } = require("./hotkeyManager");
-      const usesNativeListener = (hotkey) =>
-        !hotkey ||
-        isGlobeLikeHotkey(hotkey) ||
-        isModifierOnlyHotkey(hotkey) ||
-        isRightSideModifier(hotkey);
+        const {
+          isGlobeLikeHotkey,
+          isModifierOnlyHotkey,
+          isRightSideModifier,
+        } = require("./hotkeyManager");
+        const usesNativeListener = (hotkey) =>
+          !hotkey ||
+          isGlobeLikeHotkey(hotkey) ||
+          isModifierOnlyHotkey(hotkey) ||
+          isRightSideModifier(hotkey);
 
-      if (enabled) {
-        // Entering capture mode — unregister ALL slots so none intercept keypresses.
-        // Dictation is always active; meeting and agent may or may not be set.
-        const allSlots = hotkeyManager.slots;
-        for (const [slot, info] of allSlots) {
-          if (!info?.hotkey) continue;
+        if (enabled) {
+          // Entering capture mode — unregister ALL slots so none intercept keypresses.
+          // Dictation is always active; meeting and agent may or may not be set.
+          const allSlots = hotkeyManager.slots;
+          for (const [slot, info] of allSlots) {
+            if (!info?.hotkey) continue;
 
-          if (!usesNativeListener(info.hotkey)) {
-            debugLogger.log(
-              `[IPC] Unregistering globalShortcut "${info.hotkey}" (slot "${slot}") for capture mode`
-            );
-            const { globalShortcut } = require("electron");
-            try {
-              globalShortcut.unregister(info.hotkey);
-            } catch {}
+            if (!usesNativeListener(info.hotkey)) {
+              debugLogger.log(
+                `[IPC] Unregistering globalShortcut "${info.hotkey}" (slot "${slot}") for capture mode`
+              );
+              const { globalShortcut } = require("electron");
+              try {
+                globalShortcut.unregister(info.hotkey);
+              } catch {}
+            }
           }
-        }
 
-        // On Windows, stop the Windows key listener
-        if (process.platform === "win32" && this.windowsKeyManager) {
-          debugLogger.log("[IPC] Stopping Windows key listener for hotkey capture mode");
-          this.windowsKeyManager.stop();
-          this.quickNoteWindowsKeyManager?.stop();
-        }
+          // On Windows, stop the Windows key listener
+          if (process.platform === "win32" && this.windowsKeyManager) {
+            debugLogger.log("[IPC] Stopping Windows key listener for hotkey capture mode");
+            this.windowsKeyManager.stop();
+            this.quickNoteWindowsKeyManager?.stop();
+          }
 
-        // On Linux, stop the Linux key listener
-        if (process.platform === "linux" && this.linuxKeyManager) {
-          debugLogger.log("[IPC] Stopping Linux key listener for hotkey capture mode");
-          this.linuxKeyManager.stop();
-          this.quickNoteLinuxKeyManager?.stop();
-        }
+          // On Linux, stop the Linux key listener
+          if (process.platform === "linux" && this.linuxKeyManager) {
+            debugLogger.log("[IPC] Stopping Linux key listener for hotkey capture mode");
+            this.linuxKeyManager.stop();
+            this.quickNoteLinuxKeyManager?.stop();
+          }
 
-        // On GNOME, unregister all native keybindings during capture
-        if (hotkeyManager.isUsingGnome() && hotkeyManager.gnomeManager) {
-          for (const slot of [...hotkeyManager.gnomeManager.registeredSlots]) {
+          // On GNOME, unregister all native keybindings during capture
+          if (hotkeyManager.isUsingGnome() && hotkeyManager.gnomeManager) {
+            for (const slot of [...hotkeyManager.gnomeManager.registeredSlots]) {
+              debugLogger.log(
+                `[IPC] Unregistering GNOME keybinding (slot "${slot}") for capture mode`
+              );
+              await hotkeyManager.gnomeManager.unregisterKeybinding(slot).catch((err) => {
+                debugLogger.warn(`[IPC] Failed to unregister GNOME slot "${slot}":`, err.message);
+              });
+            }
+          }
+
+          // On Hyprland Wayland, unregister the keybinding during capture
+          if (hotkeyManager.isUsingHyprland() && hotkeyManager.hyprlandManager) {
+            debugLogger.log("[IPC] Unregistering Hyprland keybinding for hotkey capture mode");
+            await hotkeyManager.hyprlandManager.unregisterKeybinding().catch((err) => {
+              debugLogger.warn("[IPC] Failed to unregister Hyprland keybinding:", err.message);
+            });
+          }
+        } else {
+          // Exiting capture mode - re-register globalShortcut if not already registered
+          // Skip for KDE/GNOME/Hyprland — updateHotkey handles re-registration via native path
+          const usesNativePath =
+            hotkeyManager.isUsingKDE() ||
+            hotkeyManager.isUsingGnome() ||
+            hotkeyManager.isUsingHyprland();
+          if (effectiveHotkey && !usesNativeListener(effectiveHotkey) && !usesNativePath) {
+            const { globalShortcut } = require("electron");
+            const accelerator = effectiveHotkey.startsWith("Fn+")
+              ? effectiveHotkey.slice(3)
+              : effectiveHotkey;
+            if (!globalShortcut.isRegistered(accelerator)) {
+              debugLogger.log(
+                `[IPC] Re-registering globalShortcut "${accelerator}" after capture mode`
+              );
+              const callback = this.windowManager.createHotkeyCallback();
+              const registered = globalShortcut.register(accelerator, callback);
+              if (!registered) {
+                debugLogger.warn(
+                  `[IPC] Failed to re-register globalShortcut "${accelerator}" after capture mode`
+                );
+              }
+            }
+          }
+
+          if (process.platform === "win32" && this.windowsKeyManager) {
+            const activationMode = this.windowManager.getActivationMode();
             debugLogger.log(
-              `[IPC] Unregistering GNOME keybinding (slot "${slot}") for capture mode`
+              `[IPC] Exiting hotkey capture mode, activationMode="${activationMode}", hotkey="${effectiveHotkey}"`
             );
-            await hotkeyManager.gnomeManager.unregisterKeybinding(slot).catch((err) => {
-              debugLogger.warn(`[IPC] Failed to unregister GNOME slot "${slot}":`, err.message);
+            const needsListener =
+              effectiveHotkey &&
+              !isGlobeLikeHotkey(effectiveHotkey) &&
+              (activationMode === "push" ||
+                isModifierOnlyHotkey(effectiveHotkey) ||
+                isRightSideModifier(effectiveHotkey));
+            if (needsListener) {
+              debugLogger.log(
+                `[IPC] Restarting Windows key listener for hotkey: ${effectiveHotkey}`
+              );
+              this.windowsKeyManager.start(effectiveHotkey);
+            } else {
+              this.windowsKeyManager.stop();
+            }
+            const quickNoteHotkey = hotkeyManager.getSlotHotkey("quick-note");
+            const quickNeedsListener =
+              quickNoteHotkey &&
+              !isGlobeLikeHotkey(quickNoteHotkey) &&
+              (activationMode === "push" ||
+                isModifierOnlyHotkey(quickNoteHotkey) ||
+                isRightSideModifier(quickNoteHotkey));
+            if (quickNeedsListener) this.quickNoteWindowsKeyManager?.start(quickNoteHotkey);
+            else this.quickNoteWindowsKeyManager?.stop();
+          }
+
+          if (process.platform === "linux" && this.linuxKeyManager) {
+            const activationMode = this.windowManager.getActivationMode();
+            const needsListener =
+              effectiveHotkey &&
+              !isGlobeLikeHotkey(effectiveHotkey) &&
+              (activationMode === "push" ||
+                isModifierOnlyHotkey(effectiveHotkey) ||
+                isRightSideModifier(effectiveHotkey));
+            if (needsListener) {
+              debugLogger.log(`[IPC] Restarting Linux key listener for hotkey: ${effectiveHotkey}`);
+              this.linuxKeyManager.start(effectiveHotkey);
+            } else {
+              this.linuxKeyManager.stop();
+            }
+            const quickNoteHotkey = hotkeyManager.getSlotHotkey("quick-note");
+            const quickNeedsListener =
+              quickNoteHotkey &&
+              !isGlobeLikeHotkey(quickNoteHotkey) &&
+              (activationMode === "push" ||
+                isModifierOnlyHotkey(quickNoteHotkey) ||
+                isRightSideModifier(quickNoteHotkey));
+            if (quickNeedsListener) this.quickNoteLinuxKeyManager?.start(quickNoteHotkey);
+            else this.quickNoteLinuxKeyManager?.stop();
+          }
+
+          // On GNOME, re-register the keybinding with the effective hotkey
+          if (hotkeyManager.isUsingGnome() && hotkeyManager.gnomeManager && effectiveHotkey) {
+            const gnomeHotkey = GnomeShortcutManager.convertToGnomeFormat(effectiveHotkey);
+            debugLogger.log(
+              `[IPC] Re-registering GNOME keybinding "${gnomeHotkey}" after capture mode`
+            );
+            const success = await hotkeyManager.gnomeManager.registerKeybinding(gnomeHotkey);
+            if (success) {
+              hotkeyManager.currentHotkey = effectiveHotkey;
+            }
+          }
+
+          // On Hyprland Wayland, re-register the keybinding with the effective hotkey
+          if (hotkeyManager.isUsingHyprland() && hotkeyManager.hyprlandManager && effectiveHotkey) {
+            debugLogger.log(
+              `[IPC] Re-registering Hyprland keybinding "${effectiveHotkey}" after capture mode`
+            );
+            const success = await hotkeyManager.hyprlandManager.registerKeybinding(effectiveHotkey);
+            if (success) {
+              hotkeyManager.currentHotkey = effectiveHotkey;
+            }
+          }
+
+          // On KDE (X11 or Wayland), re-register the keybinding with the effective hotkey
+          if (hotkeyManager.isUsingKDE() && hotkeyManager.kdeManager && effectiveHotkey) {
+            debugLogger.log(
+              `[IPC] Re-registering KDE keybinding "${effectiveHotkey}" after capture mode`
+            );
+            const callback = this.windowManager.createHotkeyCallback();
+            const result = await hotkeyManager.kdeManager.registerKeybinding(
+              effectiveHotkey,
+              "dictation",
+              callback
+            );
+            if (result === true) {
+              hotkeyManager.currentHotkey = effectiveHotkey;
+            } else {
+              debugLogger.warn(
+                `[IPC] Failed to re-register KDE keybinding "${effectiveHotkey}" after capture mode`,
+                { result }
+              );
+            }
+          }
+
+          // Re-register non-dictation slots (meeting, agent) that were unregistered on capture enter
+          for (const [slot, info] of hotkeyManager.slots) {
+            if (slot === "dictation" || slot === "cancel" || !info?.hotkey || !info?.callback)
+              continue;
+            debugLogger.log(
+              `[IPC] Re-registering slot "${slot}" ("${info.hotkey}") after capture mode`
+            );
+            await hotkeyManager.registerSlot(slot, info.hotkey, info.callback).catch((err) => {
+              debugLogger.warn(`[IPC] Failed to re-register slot "${slot}":`, err.message);
             });
           }
         }
 
-        // On Hyprland Wayland, unregister the keybinding during capture
-        if (hotkeyManager.isUsingHyprland() && hotkeyManager.hyprlandManager) {
-          debugLogger.log("[IPC] Unregistering Hyprland keybinding for hotkey capture mode");
-          await hotkeyManager.hyprlandManager.unregisterKeybinding().catch((err) => {
-            debugLogger.warn("[IPC] Failed to unregister Hyprland keybinding:", err.message);
-          });
-        }
-      } else {
-        // Exiting capture mode - re-register globalShortcut if not already registered
-        // Skip for KDE/GNOME/Hyprland — updateHotkey handles re-registration via native path
-        const usesNativePath =
-          hotkeyManager.isUsingKDE() ||
-          hotkeyManager.isUsingGnome() ||
-          hotkeyManager.isUsingHyprland();
-        if (effectiveHotkey && !usesNativeListener(effectiveHotkey) && !usesNativePath) {
-          const { globalShortcut } = require("electron");
-          const accelerator = effectiveHotkey.startsWith("Fn+")
-            ? effectiveHotkey.slice(3)
-            : effectiveHotkey;
-          if (!globalShortcut.isRegistered(accelerator)) {
-            debugLogger.log(
-              `[IPC] Re-registering globalShortcut "${accelerator}" after capture mode`
-            );
-            const callback = this.windowManager.createHotkeyCallback();
-            const registered = globalShortcut.register(accelerator, callback);
-            if (!registered) {
-              debugLogger.warn(
-                `[IPC] Failed to re-register globalShortcut "${accelerator}" after capture mode`
-              );
-            }
-          }
-        }
-
-        if (process.platform === "win32" && this.windowsKeyManager) {
-          const activationMode = this.windowManager.getActivationMode();
-          debugLogger.log(
-            `[IPC] Exiting hotkey capture mode, activationMode="${activationMode}", hotkey="${effectiveHotkey}"`
-          );
-          const needsListener =
-            effectiveHotkey &&
-            !isGlobeLikeHotkey(effectiveHotkey) &&
-            (activationMode === "push" ||
-              isModifierOnlyHotkey(effectiveHotkey) ||
-              isRightSideModifier(effectiveHotkey));
-          if (needsListener) {
-            debugLogger.log(`[IPC] Restarting Windows key listener for hotkey: ${effectiveHotkey}`);
-            this.windowsKeyManager.start(effectiveHotkey);
-          } else {
-            this.windowsKeyManager.stop();
-          }
-          const quickNoteHotkey = hotkeyManager.getSlotHotkey("quick-note");
-          const quickNeedsListener =
-            quickNoteHotkey &&
-            !isGlobeLikeHotkey(quickNoteHotkey) &&
-            (activationMode === "push" ||
-              isModifierOnlyHotkey(quickNoteHotkey) ||
-              isRightSideModifier(quickNoteHotkey));
-          if (quickNeedsListener) this.quickNoteWindowsKeyManager?.start(quickNoteHotkey);
-          else this.quickNoteWindowsKeyManager?.stop();
-        }
-
-        if (process.platform === "linux" && this.linuxKeyManager) {
-          const activationMode = this.windowManager.getActivationMode();
-          const needsListener =
-            effectiveHotkey &&
-            !isGlobeLikeHotkey(effectiveHotkey) &&
-            (activationMode === "push" ||
-              isModifierOnlyHotkey(effectiveHotkey) ||
-              isRightSideModifier(effectiveHotkey));
-          if (needsListener) {
-            debugLogger.log(`[IPC] Restarting Linux key listener for hotkey: ${effectiveHotkey}`);
-            this.linuxKeyManager.start(effectiveHotkey);
-          } else {
-            this.linuxKeyManager.stop();
-          }
-          const quickNoteHotkey = hotkeyManager.getSlotHotkey("quick-note");
-          const quickNeedsListener =
-            quickNoteHotkey &&
-            !isGlobeLikeHotkey(quickNoteHotkey) &&
-            (activationMode === "push" ||
-              isModifierOnlyHotkey(quickNoteHotkey) ||
-              isRightSideModifier(quickNoteHotkey));
-          if (quickNeedsListener) this.quickNoteLinuxKeyManager?.start(quickNoteHotkey);
-          else this.quickNoteLinuxKeyManager?.stop();
-        }
-
-        // On GNOME, re-register the keybinding with the effective hotkey
-        if (hotkeyManager.isUsingGnome() && hotkeyManager.gnomeManager && effectiveHotkey) {
-          const gnomeHotkey = GnomeShortcutManager.convertToGnomeFormat(effectiveHotkey);
-          debugLogger.log(
-            `[IPC] Re-registering GNOME keybinding "${gnomeHotkey}" after capture mode`
-          );
-          const success = await hotkeyManager.gnomeManager.registerKeybinding(gnomeHotkey);
-          if (success) {
-            hotkeyManager.currentHotkey = effectiveHotkey;
-          }
-        }
-
-        // On Hyprland Wayland, re-register the keybinding with the effective hotkey
-        if (hotkeyManager.isUsingHyprland() && hotkeyManager.hyprlandManager && effectiveHotkey) {
-          debugLogger.log(
-            `[IPC] Re-registering Hyprland keybinding "${effectiveHotkey}" after capture mode`
-          );
-          const success = await hotkeyManager.hyprlandManager.registerKeybinding(effectiveHotkey);
-          if (success) {
-            hotkeyManager.currentHotkey = effectiveHotkey;
-          }
-        }
-
-        // On KDE (X11 or Wayland), re-register the keybinding with the effective hotkey
-        if (hotkeyManager.isUsingKDE() && hotkeyManager.kdeManager && effectiveHotkey) {
-          debugLogger.log(
-            `[IPC] Re-registering KDE keybinding "${effectiveHotkey}" after capture mode`
-          );
-          const callback = this.windowManager.createHotkeyCallback();
-          const result = await hotkeyManager.kdeManager.registerKeybinding(
-            effectiveHotkey,
-            "dictation",
-            callback
-          );
-          if (result === true) {
-            hotkeyManager.currentHotkey = effectiveHotkey;
-          } else {
-            debugLogger.warn(
-              `[IPC] Failed to re-register KDE keybinding "${effectiveHotkey}" after capture mode`,
-              { result }
-            );
-          }
-        }
-
-        // Re-register non-dictation slots (meeting, agent) that were unregistered on capture enter
-        for (const [slot, info] of hotkeyManager.slots) {
-          if (slot === "dictation" || slot === "cancel" || !info?.hotkey || !info?.callback)
-            continue;
-          debugLogger.log(
-            `[IPC] Re-registering slot "${slot}" ("${info.hotkey}") after capture mode`
-          );
-          await hotkeyManager.registerSlot(slot, info.hotkey, info.callback).catch((err) => {
-            debugLogger.warn(`[IPC] Failed to re-register slot "${slot}":`, err.message);
-          });
-        }
+        return { success: true };
       }
-
-      return { success: true };
-    });
+    );
 
     ipcMain.handle("get-hotkey-mode-info", async () => {
       const isUsingNativeShortcut = this.windowManager.isUsingNativeShortcutHotkeys();
