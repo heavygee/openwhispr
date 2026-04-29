@@ -42,6 +42,7 @@ export interface HotkeySettings {
   dictationKey: string;
   meetingKey: string;
   meetingHotkeyLayoutMode: "side-panel" | "full-width";
+  quickNoteKey: string;
   activationMode: "tap" | "push";
 }
 
@@ -219,6 +220,7 @@ function useSettingsInternal() {
     meetingKey: store.meetingKey,
     meetingHotkeyLayoutMode: store.meetingHotkeyLayoutMode,
     setMeetingHotkeyLayoutMode: store.setMeetingHotkeyLayoutMode,
+    quickNoteKey: store.quickNoteKey,
     theme: store.theme,
     setUseLocalWhisper: store.setUseLocalWhisper,
     setWhisperModel: store.setWhisperModel,
@@ -256,6 +258,7 @@ function useSettingsInternal() {
     setCleanupCustomApiKey: store.setCleanupCustomApiKey,
     setDictationKey: store.setDictationKey,
     setMeetingKey: store.setMeetingKey,
+    setQuickNoteKey: store.setQuickNoteKey,
     setTheme: store.setTheme,
     activationMode: store.activationMode,
     setActivationMode: store.setActivationMode,
@@ -311,6 +314,8 @@ function useSettingsInternal() {
     setWhisperVadSpeechPadMs: store.setWhisperVadSpeechPadMs,
     whisperVadSamplesOverlap: store.whisperVadSamplesOverlap,
     setWhisperVadSamplesOverlap: store.setWhisperVadSamplesOverlap,
+    quickNotePrompt: store.quickNotePrompt,
+    setQuickNotePrompt: store.setQuickNotePrompt,
     cloudBackupEnabled: store.cloudBackupEnabled,
     setCloudBackupEnabled: store.setCloudBackupEnabled,
     telemetryEnabled: store.telemetryEnabled,

@@ -4,8 +4,11 @@ import AudioManager from "../helpers/audioManager";
 import logger from "../utils/logger";
 import { playStartCue, playStopCue } from "../utils/dictationCues";
 import { getSettings } from "../stores/settingsStore";
+import { getEffectiveReasoningModel } from "../stores/settingsStore";
 import { getRecordingErrorTitle, getRecordingErrorDescription } from "../utils/recordingErrors";
 import { isAccessibilitySkipped } from "../utils/permissions";
+import ReasoningService from "../services/ReasoningService";
+import { QUICK_NOTES_FOLDER_NAME, formatQuickNoteWithReasoning } from "../utils/quickNoteFormatter";
 
 export const useAudioRecording = (toast, options = {}) => {
   const { t } = useTranslation();
@@ -17,9 +20,10 @@ export const useAudioRecording = (toast, options = {}) => {
   const audioManagerRef = useRef(null);
   const startLockRef = useRef(false);
   const stopLockRef = useRef(false);
+  const recordingModeRef = useRef("dictation");
   const { onToggle } = options;
 
-  const performStartRecording = useCallback(async () => {
+  const performStartRecording = useCallback(async (mode = "dictation") => {
     if (startLockRef.current) return false;
     startLockRef.current = true;
     try {
@@ -41,6 +45,7 @@ export const useAudioRecording = (toast, options = {}) => {
         : await audioManagerRef.current.startRecording();
 
       if (didStart) {
+        recordingModeRef.current = mode;
         if (getSettings().pauseMediaOnDictation) {
           window.electronAPI?.pauseMediaPlayback?.();
         }
@@ -53,6 +58,59 @@ export const useAudioRecording = (toast, options = {}) => {
       startLockRef.current = false;
     }
   }, []);
+
+  const ensureQuickNotesFolderId = useCallback(async () => {
+    const folders = (await window.electronAPI?.getFolders?.()) || [];
+    const existing = folders.find((folder) => folder?.name === QUICK_NOTES_FOLDER_NAME);
+    if (existing?.id) return existing.id;
+
+    const created = await window.electronAPI?.createFolder?.(QUICK_NOTES_FOLDER_NAME);
+    if (!created?.success || !created.folder?.id) {
+      throw new Error(created?.error || "Could not create Quick Notes folder");
+    }
+    return created.folder.id;
+  }, []);
+
+  const saveQuickNote = useCallback(
+    async (rawTranscript) => {
+      const settings = getSettings();
+      const formatted = settings.useReasoningModel
+        ? await formatQuickNoteWithReasoning(rawTranscript, {
+            quickNotePrompt: settings.quickNotePrompt,
+            reasoningFn: (text, config) =>
+              ReasoningService.processText(text, getEffectiveReasoningModel(), null, config),
+          })
+        : await formatQuickNoteWithReasoning(rawTranscript, {
+            quickNotePrompt: settings.quickNotePrompt,
+            reasoningFn: async () => {
+              throw new Error("Reasoning model disabled");
+            },
+          });
+
+      const folderId = await ensureQuickNotesFolderId();
+      const result = await window.electronAPI?.saveNote?.(
+        formatted.title,
+        formatted.content,
+        "personal",
+        null,
+        null,
+        folderId
+      );
+
+      if (!result?.success) {
+        throw new Error("Could not save Quick Note");
+      }
+
+      toast({
+        title: `Saved note: ${formatted.title}`,
+        description: formatted.usedFallback
+          ? "Saved raw transcript because formatting failed."
+          : undefined,
+        variant: "default",
+      });
+    },
+    [ensureQuickNotesFolderId, toast]
+  );
 
   const performStopRecording = useCallback(async () => {
     if (stopLockRef.current) return false;
@@ -96,6 +154,7 @@ export const useAudioRecording = (toast, options = {}) => {
         }
       },
       onError: (error) => {
+        recordingModeRef.current = "dictation";
         if (error?.title !== "Paste Error") {
           window.electronAPI?.hideDictationPreview?.();
         }
@@ -121,6 +180,8 @@ export const useAudioRecording = (toast, options = {}) => {
 
         if (result.success) {
           const transcribedText = result.text?.trim();
+          const recordingMode = recordingModeRef.current;
+          recordingModeRef.current = "dictation";
 
           if (!transcribedText) {
             window.electronAPI?.hideDictationPreview?.();
@@ -134,6 +195,20 @@ export const useAudioRecording = (toast, options = {}) => {
 
           setTranscript(result.text);
           window.electronAPI?.completeDictationPreview?.({ text: result.text });
+
+          if (recordingMode === "quick-note") {
+            try {
+              await saveQuickNote(result.text);
+            } catch (error) {
+              window.electronAPI?.hideDictationPreview?.();
+              toast({
+                title: "Quick Note failed",
+                description: error instanceof Error ? error.message : "Could not save Quick Note",
+                variant: "destructive",
+              });
+            }
+            return;
+          }
 
           const isStreaming = result.source?.includes("streaming");
           const { autoPasteEnabled, keepTranscriptionInClipboard } = getSettings();
@@ -218,6 +293,27 @@ export const useAudioRecording = (toast, options = {}) => {
       await performStopRecording();
     };
 
+    const handleQuickNoteToggle = async () => {
+      if (!audioManagerRef.current) return;
+      const currentState = audioManagerRef.current.getState();
+
+      if (!currentState.isRecording && !currentState.isProcessing) {
+        await performStartRecording("quick-note");
+      } else if (currentState.isRecording && recordingModeRef.current === "quick-note") {
+        await performStopRecording();
+      }
+    };
+
+    const handleQuickNoteStart = async () => {
+      await performStartRecording("quick-note");
+    };
+
+    const handleQuickNoteStop = async () => {
+      if (recordingModeRef.current === "quick-note") {
+        await performStopRecording();
+      }
+    };
+
     const disposeToggle = window.electronAPI.onToggleDictation(() => {
       handleToggle();
       onToggle?.();
@@ -230,6 +326,21 @@ export const useAudioRecording = (toast, options = {}) => {
 
     const disposeStop = window.electronAPI.onStopDictation?.(() => {
       handleStop();
+      onToggle?.();
+    });
+
+    const disposeQuickNoteToggle = window.electronAPI.onToggleQuickNote?.(() => {
+      handleQuickNoteToggle();
+      onToggle?.();
+    });
+
+    const disposeQuickNoteStart = window.electronAPI.onStartQuickNote?.(() => {
+      handleQuickNoteStart();
+      onToggle?.();
+    });
+
+    const disposeQuickNoteStop = window.electronAPI.onStopQuickNote?.(() => {
+      handleQuickNoteStop();
       onToggle?.();
     });
 
@@ -251,12 +362,15 @@ export const useAudioRecording = (toast, options = {}) => {
       disposeToggle?.();
       disposeStart?.();
       disposeStop?.();
+      disposeQuickNoteToggle?.();
+      disposeQuickNoteStart?.();
+      disposeQuickNoteStop?.();
       disposeNoAudio?.();
       if (audioManagerRef.current) {
         audioManagerRef.current.cleanup();
       }
     };
-  }, [toast, onToggle, performStartRecording, performStopRecording, t]);
+  }, [toast, onToggle, performStartRecording, performStopRecording, saveQuickNote, t]);
 
   const cancelRecording = useCallback(async () => {
     if (audioManagerRef.current) {

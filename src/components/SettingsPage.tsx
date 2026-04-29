@@ -2,6 +2,7 @@ import React, { useState, useCallback, useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
+import { Textarea } from "./ui/textarea";
 import { Badge } from "./ui/badge";
 import {
   RefreshCw,
@@ -679,6 +680,7 @@ export default function SettingsPage({
     cloudTranscriptionBaseUrl,
     useCleanupModel,
     dictationKey,
+    quickNoteKey,
     activationMode,
     setActivationMode,
     preferBuiltInMic,
@@ -695,6 +697,7 @@ export default function SettingsPage({
     setCloudTranscriptionBaseUrl,
     setUseCleanupModel,
     setDictationKey,
+    setQuickNoteKey,
     meetingKey,
     setMeetingKey,
     meetingHotkeyLayoutMode,
@@ -765,6 +768,8 @@ export default function SettingsPage({
     setWhisperVadSpeechPadMs,
     whisperVadSamplesOverlap,
     setWhisperVadSamplesOverlap,
+    quickNotePrompt,
+    setQuickNotePrompt,
   } = useSettings();
 
   const chatAgentKey = useSettingsStore((s) => s.chatAgentKey);
@@ -910,6 +915,11 @@ export default function SettingsPage({
     return result ?? { success: false, message: "Electron API unavailable" };
   }, []);
 
+  const quickNoteRegisterFn = useCallback(async (hotkey: string) => {
+    const result = await window.electronAPI?.registerQuickNoteHotkey?.(hotkey);
+    return result ?? { success: false, message: "Electron API unavailable" };
+  }, []);
+
   const { registerHotkey: registerMeetingHotkey, isRegistering: isMeetingHotkeyRegistering } =
     useHotkeyRegistration({
       onSuccess: (registeredHotkey) => {
@@ -921,17 +931,29 @@ export default function SettingsPage({
       registerFn: meetingRegisterFn,
     });
 
+  const { registerHotkey: registerQuickNoteHotkey, isRegistering: isQuickNoteHotkeyRegistering } =
+    useHotkeyRegistration({
+      onSuccess: (registeredHotkey) => {
+        setQuickNoteKey(registeredHotkey);
+      },
+      showSuccessToast: false,
+      showErrorToast: true,
+      showAlert: showAlertDialog,
+      registerFn: quickNoteRegisterFn,
+    });
+
   const validateDictationHotkey = useCallback(
     (hotkey: string) =>
       validateHotkeyForSlot(
         hotkey,
         {
           "settingsPage.general.meetingHotkey.title": meetingKey,
+          "Quick Note hotkey": quickNoteKey,
           "agentMode.settings.hotkey": chatAgentKey,
         },
         t
       ),
-    [meetingKey, chatAgentKey, t]
+    [meetingKey, quickNoteKey, chatAgentKey, t]
   );
 
   const validateMeetingHotkey = useCallback(
@@ -940,11 +962,26 @@ export default function SettingsPage({
         hotkey,
         {
           "settingsPage.general.hotkey.title": dictationKey,
+          "Quick Note hotkey": quickNoteKey,
           "agentMode.settings.hotkey": chatAgentKey,
         },
         t
       ),
-    [dictationKey, chatAgentKey, t]
+    [dictationKey, quickNoteKey, chatAgentKey, t]
+  );
+
+  const validateQuickNoteHotkey = useCallback(
+    (hotkey: string) =>
+      validateHotkeyForSlot(
+        hotkey,
+        {
+          "settingsPage.general.hotkey.title": dictationKey,
+          "settingsPage.general.meetingHotkey.title": meetingKey,
+          "agentMode.settings.hotkey": chatAgentKey,
+        },
+        t
+      ),
+    [dictationKey, meetingKey, chatAgentKey, t]
   );
 
   const validateAgentHotkey = useCallback(
@@ -954,10 +991,11 @@ export default function SettingsPage({
         {
           "settingsPage.general.hotkey.title": dictationKey,
           "settingsPage.general.meetingHotkey.title": meetingKey,
+          "Quick Note hotkey": quickNoteKey,
         },
         t
       ),
-    [dictationKey, meetingKey, t]
+    [dictationKey, meetingKey, quickNoteKey, t]
   );
 
   const [isUsingNativeShortcut, setIsUsingNativeShortcut] = useState(false);
@@ -3279,6 +3317,38 @@ EOF`,
                       </SelectItem>
                     </SelectContent>
                   </Select>
+                </SettingsPanelRow>
+              </SettingsPanel>
+            </div>
+
+            {/* Quick Note Hotkey */}
+            <div>
+              <SectionHeader
+                title="Quick Note hotkey"
+                description="Record a one-off spoken note without paste or clipboard output. Uses the same tap or hold activation mode as dictation."
+              />
+              <SettingsPanel>
+                <SettingsPanelRow>
+                  <HotkeyInput
+                    value={quickNoteKey}
+                    onChange={async (newHotkey) => {
+                      await registerQuickNoteHotkey(newHotkey);
+                    }}
+                    disabled={isQuickNoteHotkeyRegistering}
+                    validate={validateQuickNoteHotkey}
+                  />
+                  {quickNoteKey && (
+                    <button
+                      onClick={async () => {
+                        await window.electronAPI?.registerQuickNoteHotkey?.("");
+                        setQuickNoteKey("");
+                      }}
+                      disabled={isQuickNoteHotkeyRegistering}
+                      className="mt-2 text-xs text-muted-foreground/70 hover:text-foreground transition-colors disabled:opacity-50"
+                    >
+                      Clear quick note hotkey
+                    </button>
+                  )}
                 </SettingsPanelRow>
               </SettingsPanel>
             </div>

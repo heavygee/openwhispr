@@ -280,6 +280,8 @@ class IPCHandlers {
     this.updateManager = managers.updateManager;
     this.windowsKeyManager = managers.windowsKeyManager;
     this.linuxKeyManager = managers.linuxKeyManager;
+    this.quickNoteWindowsKeyManager = managers.quickNoteWindowsKeyManager;
+    this.quickNoteLinuxKeyManager = managers.quickNoteLinuxKeyManager;
     this.textEditMonitor = managers.textEditMonitor;
     this.getTrayManager = managers.getTrayManager;
     this.whisperCudaManager = managers.whisperCudaManager;
@@ -2145,12 +2147,14 @@ class IPCHandlers {
         if (process.platform === "win32" && this.windowsKeyManager) {
           debugLogger.log("[IPC] Stopping Windows key listener for hotkey capture mode");
           this.windowsKeyManager.stop();
+          this.quickNoteWindowsKeyManager?.stop();
         }
 
         // On Linux, stop the Linux key listener
         if (process.platform === "linux" && this.linuxKeyManager) {
           debugLogger.log("[IPC] Stopping Linux key listener for hotkey capture mode");
           this.linuxKeyManager.stop();
+          this.quickNoteLinuxKeyManager?.stop();
         }
 
         // On GNOME, unregister all native keybindings during capture
@@ -2215,6 +2219,15 @@ class IPCHandlers {
           } else {
             this.windowsKeyManager.stop();
           }
+          const quickNoteHotkey = hotkeyManager.getSlotHotkey("quick-note");
+          const quickNeedsListener =
+            quickNoteHotkey &&
+            !isGlobeLikeHotkey(quickNoteHotkey) &&
+            (activationMode === "push" ||
+              isModifierOnlyHotkey(quickNoteHotkey) ||
+              isRightSideModifier(quickNoteHotkey));
+          if (quickNeedsListener) this.quickNoteWindowsKeyManager?.start(quickNoteHotkey);
+          else this.quickNoteWindowsKeyManager?.stop();
         }
 
         if (process.platform === "linux" && this.linuxKeyManager) {
@@ -2231,6 +2244,15 @@ class IPCHandlers {
           } else {
             this.linuxKeyManager.stop();
           }
+          const quickNoteHotkey = hotkeyManager.getSlotHotkey("quick-note");
+          const quickNeedsListener =
+            quickNoteHotkey &&
+            !isGlobeLikeHotkey(quickNoteHotkey) &&
+            (activationMode === "push" ||
+              isModifierOnlyHotkey(quickNoteHotkey) ||
+              isRightSideModifier(quickNoteHotkey));
+          if (quickNeedsListener) this.quickNoteLinuxKeyManager?.start(quickNoteHotkey);
+          else this.quickNoteLinuxKeyManager?.stop();
         }
 
         // On GNOME, re-register the keybinding with the effective hotkey
@@ -2719,6 +2741,10 @@ class IPCHandlers {
 
     ipcMain.handle("save-dictation-key", async (event, key) => {
       return this.environmentManager.saveDictationKey(key);
+    });
+
+    ipcMain.handle("get-quick-note-key", async () => {
+      return this.environmentManager.getQuickNoteKey();
     });
 
     ipcMain.handle("get-active-dictation-key", async () => {
