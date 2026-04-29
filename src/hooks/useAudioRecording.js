@@ -4,7 +4,7 @@ import AudioManager from "../helpers/audioManager";
 import logger from "../utils/logger";
 import { playStartCue, playStopCue } from "../utils/dictationCues";
 import { getSettings } from "../stores/settingsStore";
-import { getEffectiveReasoningModel } from "../stores/settingsStore";
+import { getEffectiveCleanupModel } from "../stores/settingsStore";
 import { getRecordingErrorTitle, getRecordingErrorDescription } from "../utils/recordingErrors";
 import { isAccessibilitySkipped } from "../utils/permissions";
 import ReasoningService from "../services/ReasoningService";
@@ -74,16 +74,16 @@ export const useAudioRecording = (toast, options = {}) => {
   const saveQuickNote = useCallback(
     async (rawTranscript) => {
       const settings = getSettings();
-      const formatted = settings.useReasoningModel
+      const formatted = settings.useCleanupModel
         ? await formatQuickNoteWithReasoning(rawTranscript, {
             quickNotePrompt: settings.quickNotePrompt,
             reasoningFn: (text, config) =>
-              ReasoningService.processText(text, getEffectiveReasoningModel(), null, config),
+              ReasoningService.processText(text, getEffectiveCleanupModel(), null, config),
           })
         : await formatQuickNoteWithReasoning(rawTranscript, {
             quickNotePrompt: settings.quickNotePrompt,
             reasoningFn: async () => {
-              throw new Error("Reasoning model disabled");
+              throw new Error("Cleanup model disabled");
             },
           });
 

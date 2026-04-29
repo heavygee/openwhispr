@@ -3270,6 +3270,7 @@ EOF`,
                 <SettingsPanelRow>
                   <HotkeyInput
                     value={meetingKey}
+                    hotkeySlot="meeting"
                     onChange={async (newHotkey) => {
                       await registerMeetingHotkey(newHotkey);
                     }}
@@ -3331,6 +3332,7 @@ EOF`,
                 <SettingsPanelRow>
                   <HotkeyInput
                     value={quickNoteKey}
+                    hotkeySlot="quick-note"
                     onChange={async (newHotkey) => {
                       await registerQuickNoteHotkey(newHotkey);
                     }}
@@ -3363,6 +3365,7 @@ EOF`,
                 <SettingsPanelRow>
                   <HotkeyInput
                     value={chatAgentKey}
+                    hotkeySlot="agent"
                     onChange={setChatAgentKey}
                     validate={validateAgentHotkey}
                   />
