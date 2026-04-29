@@ -31,12 +31,12 @@ OpenWhispr turns your voice into text, notes, and actions from your desktop. Pre
 
 ## Download
 
-| Platform | Download |
-|----------|----------|
-| macOS (Apple Silicon) | [`.dmg`](https://github.com/OpenWhispr/openwhispr/releases/latest) |
-| macOS (Intel) | [`.dmg`](https://github.com/OpenWhispr/openwhispr/releases/latest) |
-| Windows | [`.exe`](https://github.com/OpenWhispr/openwhispr/releases/latest) |
-| Linux | [`.AppImage`](https://github.com/OpenWhispr/openwhispr/releases/latest) / [`.deb`](https://github.com/OpenWhispr/openwhispr/releases/latest) / [`.rpm`](https://github.com/OpenWhispr/openwhispr/releases/latest) |
+| Platform              | Download                                                                                                                                                                                                          |
+| --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| macOS (Apple Silicon) | [`.dmg`](https://github.com/OpenWhispr/openwhispr/releases/latest)                                                                                                                                                |
+| macOS (Intel)         | [`.dmg`](https://github.com/OpenWhispr/openwhispr/releases/latest)                                                                                                                                                |
+| Windows               | [`.exe`](https://github.com/OpenWhispr/openwhispr/releases/latest)                                                                                                                                                |
+| Linux                 | [`.AppImage`](https://github.com/OpenWhispr/openwhispr/releases/latest) / [`.deb`](https://github.com/OpenWhispr/openwhispr/releases/latest) / [`.rpm`](https://github.com/OpenWhispr/openwhispr/releases/latest) |
 
 ## Features
 
@@ -68,6 +68,10 @@ Visit **[docs.openwhispr.com](https://docs.openwhispr.com)** for:
 - [API reference](https://docs.openwhispr.com/api/overview)
 - [MCP server setup](https://docs.openwhispr.com/integrations/mcp)
 - [Troubleshooting](https://docs.openwhispr.com/troubleshooting)
+
+Fork-specific build notes:
+
+- [Unsigned Windows artifact build](docs/build-windows.md)
 
 ## Tech stack
 

@@ -1,0 +1,64 @@
+name: Windows Artifact
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-windows:
+    name: Build unsigned Windows artifact
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install platform-specific native binaries
+        run: npm install @rollup/rollup-win32-x64-msvc lightningcss-win32-x64-msvc @tailwindcss/oxide-win32-x64-msvc --no-save
+
+      - name: Cache native binaries
+        uses: actions/cache@v4
+        with:
+          path: resources/bin
+          key: windows-x64-bin-${{ hashFiles('scripts/download-*.js') }}
+
+      - name: Cache Electron
+        uses: actions/cache@v4
+        with:
+          path: ~/AppData/Local/electron/Cache
+          key: windows-electron-${{ hashFiles('**/package-lock.json') }}
+          restore-keys: windows-electron-
+
+      - name: Create runtime env
+        shell: bash
+        run: |
+          touch .env
+          echo "GOOGLE_CALENDAR_CLIENT_ID=${{ secrets.GOOGLE_CALENDAR_CLIENT_ID }}" >> .env
+          echo "GOOGLE_CALENDAR_CLIENT_SECRET=${{ secrets.GOOGLE_CALENDAR_CLIENT_SECRET }}" >> .env
+
+      - name: Build unsigned Windows installer
+        run: npm run build:win -- --publish never --config.win.azureSignOptions=null --config.publish=null
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_TOKEN: ${{ github.token }}
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+          VITE_NEON_AUTH_URL: ${{ vars.VITE_NEON_AUTH_URL }}
+          VITE_OPENWHISPR_API_URL: ${{ vars.VITE_OPENWHISPR_API_URL }}
+          VITE_OPENWHISPR_OAUTH_CALLBACK_URL: ${{ vars.VITE_OPENWHISPR_OAUTH_CALLBACK_URL }}
+
+      - name: Upload Windows artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: openwhispr-windows-unsigned
+          path: dist/
+          retention-days: 7
