@@ -46,8 +46,19 @@ jobs:
           echo "GOOGLE_CALENDAR_CLIENT_ID=${{ secrets.GOOGLE_CALENDAR_CLIENT_ID }}" >> .env
           echo "GOOGLE_CALENDAR_CLIENT_SECRET=${{ secrets.GOOGLE_CALENDAR_CLIENT_SECRET }}" >> .env
 
+      - name: Create unsigned builder config
+        shell: bash
+        run: |
+          node - <<'NODE'
+          const fs = require("fs");
+          const config = JSON.parse(fs.readFileSync("electron-builder.json", "utf8"));
+          config.win = { ...config.win, azureSignOptions: null };
+          config.publish = null;
+          fs.writeFileSync("electron-builder.unsigned.json", JSON.stringify(config, null, 2));
+          NODE
+
       - name: Build unsigned Windows installer
-        run: npm run build:win -- --publish never --config.win.azureSignOptions=null --config.publish=null
+        run: npm run build:win -- --publish never --config electron-builder.unsigned.json
         env:
           GH_TOKEN: ${{ github.token }}
           GITHUB_TOKEN: ${{ github.token }}

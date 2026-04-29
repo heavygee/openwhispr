@@ -15,7 +15,8 @@ From a Windows machine with Node.js 24+:
 ```powershell
 npm ci
 $env:CSC_IDENTITY_AUTO_DISCOVERY = "false"
-npm run build:win -- --publish never --config.win.azureSignOptions=null --config.publish=null
+node -e "const fs=require('fs'); const c=JSON.parse(fs.readFileSync('electron-builder.json','utf8')); c.win={...c.win, azureSignOptions:null}; c.publish=null; fs.writeFileSync('electron-builder.unsigned.json', JSON.stringify(c,null,2));"
+npm run build:win -- --publish never --config electron-builder.unsigned.json
 ```
 
 Artifacts are written to `dist/`.
