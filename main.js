@@ -155,10 +155,12 @@ function shouldRegisterProtocolWithAppArg() {
 function getDefaultHtmlHandler() {
   try {
     const { execFileSync } = require("child_process");
-    return execFileSync("xdg-mime", ["query", "default", "text/html"], {
-      encoding: "utf8",
-      timeout: 3000,
-    }).trim() || null;
+    return (
+      execFileSync("xdg-mime", ["query", "default", "text/html"], {
+        encoding: "utf8",
+        timeout: 3000,
+      }).trim() || null
+    );
   } catch {
     return null;
   }
@@ -277,6 +279,8 @@ let updateManager = null;
 let globeKeyManager = null;
 let windowsKeyManager = null;
 let linuxKeyManager = null;
+let quickNoteWindowsKeyManager = null;
+let quickNoteLinuxKeyManager = null;
 let textEditMonitor = null;
 let whisperCudaManager = null;
 let googleCalendarManager = null;
@@ -363,6 +367,8 @@ function initializeCoreManagers() {
   updateManager.setWindowManager(windowManager);
   windowsKeyManager = new WindowsKeyManager();
   linuxKeyManager = new LinuxKeyManager();
+  quickNoteWindowsKeyManager = new WindowsKeyManager();
+  quickNoteLinuxKeyManager = new LinuxKeyManager();
   textEditMonitor = new TextEditMonitor();
   audioTapManager = new AudioTapManager();
   linuxPortalAudioManager = new LinuxPortalAudioManager();
@@ -381,6 +387,8 @@ function initializeCoreManagers() {
     updateManager,
     windowsKeyManager,
     linuxKeyManager,
+    quickNoteWindowsKeyManager,
+    quickNoteLinuxKeyManager,
     textEditMonitor,
     whisperCudaManager,
     googleCalendarManager,
@@ -716,6 +724,81 @@ async function startApp() {
     }
   });
 
+  // Set up Quick Note hotkey
+  const quickNoteHotkeyCallback = windowManager.createQuickNoteHotkeyCallback();
+  windowManager._quickNoteHotkeyCallback = quickNoteHotkeyCallback;
+
+  const savedQuickNoteKey = environmentManager.getQuickNoteKey?.() || "";
+  if (savedQuickNoteKey) {
+    const result = await hotkeyManager.registerSlot(
+      "quick-note",
+      savedQuickNoteKey,
+      quickNoteHotkeyCallback
+    );
+    debugLogger.info(
+      "Quick Note hotkey startup registration",
+      { savedQuickNoteKey, ...result },
+      "hotkey"
+    );
+  }
+
+  ipcMain.handle("register-quick-note-hotkey", async (_event, hotkey) => {
+    if (hotkey) {
+      const result = await hotkeyManager.registerSlot(
+        "quick-note",
+        hotkey,
+        quickNoteHotkeyCallback
+      );
+      if (result.success) {
+        environmentManager.saveQuickNoteKey(hotkey);
+        const activationMode = windowManager.getActivationMode();
+        const needsNativeListenerForQuickNote =
+          hotkey &&
+          !/^GLOBE$|^Fn$/i.test(hotkey) &&
+          (activationMode === "push" ||
+            /^Right(Control|Ctrl|Alt|Option|Shift|Super|Win|Meta|Command|Cmd)$/i.test(hotkey) ||
+            hotkey
+              .split("+")
+              .every((part) =>
+                [
+                  "control",
+                  "ctrl",
+                  "alt",
+                  "option",
+                  "shift",
+                  "super",
+                  "meta",
+                  "win",
+                  "command",
+                  "cmd",
+                  "commandorcontrol",
+                  "cmdorctrl",
+                ].includes(part.toLowerCase())
+              ));
+        if (process.platform === "win32") {
+          quickNoteWindowsKeyManager.stop();
+          if (needsNativeListenerForQuickNote) quickNoteWindowsKeyManager.start(hotkey);
+        } else if (process.platform === "linux") {
+          quickNoteLinuxKeyManager.stop();
+          if (needsNativeListenerForQuickNote) quickNoteLinuxKeyManager.start(hotkey);
+        }
+        return { success: true };
+      }
+      return { success: false, message: result.error };
+    }
+
+    hotkeyManager.unregisterSlot("quick-note");
+    environmentManager.saveQuickNoteKey("");
+    quickNoteWindowsKeyManager?.stop();
+    quickNoteLinuxKeyManager?.stop();
+    return { success: true };
+  });
+
+  ipcMain.handle("save-quick-note-key", async (_event, hotkey) => {
+    environmentManager.saveQuickNoteKey(hotkey || "");
+    return { success: true };
+  });
+
   // Phase 2: Initialize remaining managers after windows are visible
   initializeDeferredManagers();
 
@@ -811,6 +894,7 @@ async function startApp() {
     let globeKeyDownTime = 0;
     let globeKeyIsRecording = false;
     let globeLastStopTime = 0;
+    let globeKeyDestination = "dictation";
     const MIN_HOLD_DURATION_MS = 150;
     const POST_STOP_COOLDOWN_MS = 300;
 
@@ -844,6 +928,7 @@ async function startApp() {
             const pressTime = now;
             globeKeyDownTime = pressTime;
             globeKeyIsRecording = false;
+            globeKeyDestination = "dictation";
             setTimeout(async () => {
               if (globeKeyDownTime === pressTime && !globeKeyIsRecording) {
                 globeKeyIsRecording = true;
@@ -866,6 +951,28 @@ async function startApp() {
       } else if (!isGlobeLikeHotkey(currentHotkey)) {
         debugLogger?.debug("[Globe] Ignored — hotkey is not GLOBE", { currentHotkey });
       }
+
+      const quickNoteHotkey = hotkeyManager.getSlotHotkey("quick-note");
+      if (quickNoteHotkey && isGlobeLikeHotkey(quickNoteHotkey) && mainWindowLive) {
+        const activationMode = windowManager.getActivationMode();
+        if (activationMode === "push") {
+          const now = Date.now();
+          if (now - globeLastStopTime < POST_STOP_COOLDOWN_MS) return;
+          windowManager.showDictationPanel();
+          const pressTime = now;
+          globeKeyDownTime = pressTime;
+          globeKeyIsRecording = false;
+          globeKeyDestination = "quick-note";
+          setTimeout(async () => {
+            if (globeKeyDownTime === pressTime && !globeKeyIsRecording) {
+              globeKeyIsRecording = true;
+              windowManager.sendStartQuickNote();
+            }
+          }, MIN_HOLD_DURATION_MS);
+        } else {
+          windowManager.sendToggleQuickNote();
+        }
+      }
     });
 
     globeKeyManager.on("globe-up", async () => {
@@ -876,7 +983,11 @@ async function startApp() {
         windowManager.controlPanelWindow.webContents.send("globe-key-released");
       }
 
-      if (hotkeyManager.getCurrentHotkey && isGlobeLikeHotkey(hotkeyManager.getCurrentHotkey())) {
+      const quickNoteHotkey = hotkeyManager.getSlotHotkey("quick-note");
+      if (
+        (hotkeyManager.getCurrentHotkey && isGlobeLikeHotkey(hotkeyManager.getCurrentHotkey())) ||
+        (quickNoteHotkey && isGlobeLikeHotkey(quickNoteHotkey))
+      ) {
         const activationMode = windowManager.getActivationMode();
         if (activationMode === "push") {
           globeKeyDownTime = 0;
@@ -884,7 +995,11 @@ async function startApp() {
           if (globeKeyIsRecording) {
             globeKeyIsRecording = false;
             debugLogger?.debug("[Globe] Stopping dictation (push release)");
-            windowManager.sendStopDictation();
+            if (globeKeyDestination === "quick-note") {
+              windowManager.sendStopQuickNote();
+            } else {
+              windowManager.sendStopDictation();
+            }
           }
         }
       }
@@ -913,6 +1028,28 @@ async function startApp() {
         windowManager.toggleAgentOverlay();
       }
 
+      const quickNoteHotkey = hotkeyManager.getSlotHotkey("quick-note");
+      if (quickNoteHotkey === modifier && isLiveWindow(windowManager.mainWindow)) {
+        const activationMode = windowManager.getActivationMode();
+        if (activationMode === "push") {
+          const now = Date.now();
+          if (now - rightModLastStopTime < POST_STOP_COOLDOWN_MS) return;
+          windowManager.showDictationPanel();
+          const pressTime = now;
+          rightModDownTime = pressTime;
+          rightModIsRecording = false;
+          setTimeout(() => {
+            if (rightModDownTime === pressTime && !rightModIsRecording) {
+              rightModIsRecording = true;
+              windowManager.sendStartQuickNote();
+            }
+          }, MIN_HOLD_DURATION_MS);
+        } else {
+          windowManager.sendToggleQuickNote();
+        }
+        return;
+      }
+
       if (currentHotkey !== modifier) return;
       if (!isLiveWindow(windowManager.mainWindow)) return;
 
@@ -939,7 +1076,8 @@ async function startApp() {
     globeKeyManager.on("right-modifier-up", async (modifier) => {
       const currentHotkey = hotkeyManager.getCurrentHotkey && hotkeyManager.getCurrentHotkey();
 
-      if (currentHotkey === modifier) {
+      const quickNoteHotkey = hotkeyManager.getSlotHotkey("quick-note");
+      if (currentHotkey === modifier || quickNoteHotkey === modifier) {
         if (!isLiveWindow(windowManager.mainWindow)) return;
 
         const activationMode = windowManager.getActivationMode();
@@ -948,7 +1086,11 @@ async function startApp() {
           rightModLastStopTime = Date.now();
           if (rightModIsRecording) {
             rightModIsRecording = false;
-            windowManager.sendStopDictation();
+            if (quickNoteHotkey === modifier) {
+              windowManager.sendStopQuickNote();
+            } else {
+              windowManager.sendStopDictation();
+            }
           } else {
             windowManager.hideDictationPanel();
           }
@@ -1070,13 +1212,47 @@ async function startApp() {
       debugLogger.debug("[Push-to-Talk] WindowsKeyManager is ready and listening");
     });
 
+    quickNoteWindowsKeyManager.on("key-down", () => {
+      if (!isLiveWindow(windowManager.mainWindow)) return;
+
+      const activationMode = windowManager.getActivationMode();
+      if (activationMode === "push") {
+        windowManager.startWindowsPushToTalk("quick-note");
+      } else if (activationMode === "tap") {
+        windowManager.sendToggleQuickNote();
+      }
+    });
+
+    quickNoteWindowsKeyManager.on("key-up", () => {
+      if (windowManager.winPushState?.active) {
+        windowManager.handleWindowsPushKeyUp();
+      } else if (isLiveWindow(windowManager.mainWindow)) {
+        const activationMode = windowManager.getActivationMode();
+        if (activationMode === "push") {
+          windowManager.handleWindowsPushKeyUp();
+        }
+      }
+    });
+
+    quickNoteWindowsKeyManager.on("error", (error) => {
+      debugLogger.warn("[Quick Note PTT] Windows key listener error", { error: error.message });
+    });
+
+    quickNoteWindowsKeyManager.on("unavailable", () => {
+      debugLogger.debug("[Quick Note PTT] Windows key listener not available");
+    });
+
     const startWindowsKeyListener = () => {
       if (!isLiveWindow(windowManager.mainWindow)) return;
       const activationMode = windowManager.getActivationMode();
       const currentHotkey = hotkeyManager.getCurrentHotkey();
+      const quickNoteHotkey = hotkeyManager.getSlotHotkey("quick-note");
 
       if (needsNativeListener(currentHotkey, activationMode)) {
         windowsKeyManager.start(currentHotkey);
+      }
+      if (needsNativeListener(quickNoteHotkey, activationMode)) {
+        quickNoteWindowsKeyManager.start(quickNoteHotkey);
       }
     };
 
@@ -1090,6 +1266,12 @@ async function startApp() {
         windowsKeyManager.start(currentHotkey);
       } else {
         windowsKeyManager.stop();
+      }
+      const quickNoteHotkey = hotkeyManager.getSlotHotkey("quick-note");
+      if (needsNativeListener(quickNoteHotkey, mode)) {
+        quickNoteWindowsKeyManager.start(quickNoteHotkey);
+      } else {
+        quickNoteWindowsKeyManager.stop();
       }
     });
 
@@ -1143,7 +1325,9 @@ async function startApp() {
     });
 
     linuxKeyManager.on("permission-denied", () => {
-      debugLogger.warn("[Push-to-Talk] Linux key listener has no permission to access input devices");
+      debugLogger.warn(
+        "[Push-to-Talk] Linux key listener has no permission to access input devices"
+      );
       if (isLiveWindow(windowManager.mainWindow)) {
         windowManager.mainWindow.webContents.send("linux-ptt-permission-denied");
       }
@@ -1163,13 +1347,51 @@ async function startApp() {
       debugLogger.debug("[Push-to-Talk] LinuxKeyManager is ready and listening");
     });
 
+    quickNoteLinuxKeyManager.on("key-down", () => {
+      if (!isLiveWindow(windowManager.mainWindow)) return;
+
+      const activationMode = windowManager.getActivationMode();
+      if (activationMode === "push") {
+        windowManager.startWindowsPushToTalk("quick-note");
+      } else if (activationMode === "tap") {
+        windowManager.sendToggleQuickNote();
+      }
+    });
+
+    quickNoteLinuxKeyManager.on("key-up", () => {
+      if (!isLiveWindow(windowManager.mainWindow)) return;
+
+      const activationMode = windowManager.getActivationMode();
+      if (activationMode === "push") {
+        windowManager.handleWindowsPushKeyUp();
+      }
+    });
+
+    quickNoteLinuxKeyManager.on("permission-denied", () => {
+      debugLogger.warn(
+        "[Quick Note PTT] Linux key listener has no permission to access input devices"
+      );
+    });
+
+    quickNoteLinuxKeyManager.on("error", (error) => {
+      debugLogger.warn("[Quick Note PTT] Linux key listener error", { error: error.message });
+    });
+
+    quickNoteLinuxKeyManager.on("unavailable", () => {
+      debugLogger.debug("[Quick Note PTT] Linux key listener not available");
+    });
+
     const startLinuxKeyListener = () => {
       if (!isLiveWindow(windowManager.mainWindow)) return;
       const activationMode = windowManager.getActivationMode();
       const currentHotkey = hotkeyManager.getCurrentHotkey();
+      const quickNoteHotkey = hotkeyManager.getSlotHotkey("quick-note");
 
       if (needsNativeListener(currentHotkey, activationMode)) {
         linuxKeyManager.start(currentHotkey);
+      }
+      if (needsNativeListener(quickNoteHotkey, activationMode)) {
+        quickNoteLinuxKeyManager.start(quickNoteHotkey);
       }
     };
 
@@ -1183,6 +1405,12 @@ async function startApp() {
         linuxKeyManager.start(currentHotkey);
       } else {
         linuxKeyManager.stop();
+      }
+      const quickNoteHotkey = hotkeyManager.getSlotHotkey("quick-note");
+      if (needsNativeListener(quickNoteHotkey, mode)) {
+        quickNoteLinuxKeyManager.start(quickNoteHotkey);
+      } else {
+        quickNoteLinuxKeyManager.stop();
       }
     });
 
@@ -1352,6 +1580,12 @@ if (gotSingleInstanceLock) {
     }
     if (linuxKeyManager) {
       linuxKeyManager.stop();
+    }
+    if (quickNoteWindowsKeyManager) {
+      quickNoteWindowsKeyManager.stop();
+    }
+    if (quickNoteLinuxKeyManager) {
+      quickNoteLinuxKeyManager.stop();
     }
     if (meetingDetectionEngine) {
       meetingDetectionEngine.stop();

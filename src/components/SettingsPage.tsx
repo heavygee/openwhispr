@@ -2,6 +2,7 @@ import React, { useState, useCallback, useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
+import { Textarea } from "./ui/textarea";
 import { Badge } from "./ui/badge";
 import {
   RefreshCw,
@@ -790,6 +791,7 @@ export default function SettingsPage({
     groqApiKey,
     mistralApiKey,
     dictationKey,
+    quickNoteKey,
     activationMode,
     setActivationMode,
     preferBuiltInMic,
@@ -818,6 +820,7 @@ export default function SettingsPage({
     customReasoningApiKey,
     setCustomReasoningApiKey,
     setDictationKey,
+    setQuickNoteKey,
     meetingKey,
     setMeetingKey,
     autoLearnCorrections,
@@ -866,6 +869,8 @@ export default function SettingsPage({
     setNoteFilesEnabled,
     noteFilesPath,
     setNoteFilesPath,
+    quickNotePrompt,
+    setQuickNotePrompt,
   } = useSettings();
 
   const agentKey = useSettingsStore((s) => s.agentKey);
@@ -1029,6 +1034,11 @@ export default function SettingsPage({
     return result ?? { success: false, message: "Electron API unavailable" };
   }, []);
 
+  const quickNoteRegisterFn = useCallback(async (hotkey: string) => {
+    const result = await window.electronAPI?.registerQuickNoteHotkey?.(hotkey);
+    return result ?? { success: false, message: "Electron API unavailable" };
+  }, []);
+
   const { registerHotkey: registerMeetingHotkey, isRegistering: isMeetingHotkeyRegistering } =
     useHotkeyRegistration({
       onSuccess: (registeredHotkey) => {
@@ -1040,17 +1050,29 @@ export default function SettingsPage({
       registerFn: meetingRegisterFn,
     });
 
+  const { registerHotkey: registerQuickNoteHotkey, isRegistering: isQuickNoteHotkeyRegistering } =
+    useHotkeyRegistration({
+      onSuccess: (registeredHotkey) => {
+        setQuickNoteKey(registeredHotkey);
+      },
+      showSuccessToast: false,
+      showErrorToast: true,
+      showAlert: showAlertDialog,
+      registerFn: quickNoteRegisterFn,
+    });
+
   const validateDictationHotkey = useCallback(
     (hotkey: string) =>
       validateHotkeyForSlot(
         hotkey,
         {
           "settingsPage.general.meetingHotkey.title": meetingKey,
+          "Quick Note hotkey": quickNoteKey,
           "agentMode.settings.hotkey": agentKey,
         },
         t
       ),
-    [meetingKey, agentKey, t]
+    [meetingKey, quickNoteKey, agentKey, t]
   );
 
   const validateMeetingHotkey = useCallback(
@@ -1059,11 +1081,26 @@ export default function SettingsPage({
         hotkey,
         {
           "settingsPage.general.hotkey.title": dictationKey,
+          "Quick Note hotkey": quickNoteKey,
           "agentMode.settings.hotkey": agentKey,
         },
         t
       ),
-    [dictationKey, agentKey, t]
+    [dictationKey, quickNoteKey, agentKey, t]
+  );
+
+  const validateQuickNoteHotkey = useCallback(
+    (hotkey: string) =>
+      validateHotkeyForSlot(
+        hotkey,
+        {
+          "settingsPage.general.hotkey.title": dictationKey,
+          "settingsPage.general.meetingHotkey.title": meetingKey,
+          "agentMode.settings.hotkey": agentKey,
+        },
+        t
+      ),
+    [dictationKey, meetingKey, agentKey, t]
   );
 
   const validateAgentHotkey = useCallback(
@@ -1073,10 +1110,11 @@ export default function SettingsPage({
         {
           "settingsPage.general.hotkey.title": dictationKey,
           "settingsPage.general.meetingHotkey.title": meetingKey,
+          "Quick Note hotkey": quickNoteKey,
         },
         t
       ),
-    [dictationKey, meetingKey, t]
+    [dictationKey, meetingKey, quickNoteKey, t]
   );
 
   const [isUsingNativeShortcut, setIsUsingNativeShortcut] = useState(false);
@@ -3160,6 +3198,38 @@ EOF`,
               </SettingsPanel>
             </div>
 
+            {/* Quick Note Hotkey */}
+            <div>
+              <SectionHeader
+                title="Quick Note hotkey"
+                description="Record a one-off spoken note without paste or clipboard output. Uses the same tap or hold activation mode as dictation."
+              />
+              <SettingsPanel>
+                <SettingsPanelRow>
+                  <HotkeyInput
+                    value={quickNoteKey}
+                    onChange={async (newHotkey) => {
+                      await registerQuickNoteHotkey(newHotkey);
+                    }}
+                    disabled={isQuickNoteHotkeyRegistering}
+                    validate={validateQuickNoteHotkey}
+                  />
+                  {quickNoteKey && (
+                    <button
+                      onClick={async () => {
+                        await window.electronAPI?.registerQuickNoteHotkey?.("");
+                        setQuickNoteKey("");
+                      }}
+                      disabled={isQuickNoteHotkeyRegistering}
+                      className="mt-2 text-xs text-muted-foreground/70 hover:text-foreground transition-colors disabled:opacity-50"
+                    >
+                      Clear quick note hotkey
+                    </button>
+                  )}
+                </SettingsPanelRow>
+              </SettingsPanel>
+            </div>
+
             {/* Agent Hotkey */}
             <div>
               <SectionHeader
@@ -3371,6 +3441,23 @@ EOF`,
                     description={t("settingsPage.prompts.description")}
                   />
                   <PromptStudio />
+                </div>
+
+                <div className="border-t border-border/40 pt-6">
+                  <SectionHeader
+                    title="Quick Note Prompt"
+                    description="Controls how the Quick Note shortcut turns a transcript into a title and Markdown note."
+                  />
+                  <SettingsPanel>
+                    <SettingsPanelRow>
+                      <Textarea
+                        value={quickNotePrompt}
+                        onChange={(event) => setQuickNotePrompt(event.target.value)}
+                        rows={10}
+                        className="font-mono text-xs"
+                      />
+                    </SettingsPanelRow>
+                  </SettingsPanel>
                 </div>
               </div>
             )}

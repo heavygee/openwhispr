@@ -40,6 +40,7 @@ export interface ReasoningSettings {
 export interface HotkeySettings {
   dictationKey: string;
   meetingKey: string;
+  quickNoteKey: string;
   activationMode: "tap" | "push";
 }
 
@@ -207,6 +208,7 @@ function useSettingsInternal() {
     mistralApiKey: store.mistralApiKey,
     dictationKey: store.dictationKey,
     meetingKey: store.meetingKey,
+    quickNoteKey: store.quickNoteKey,
     theme: store.theme,
     setUseLocalWhisper: store.setUseLocalWhisper,
     setWhisperModel: store.setWhisperModel,
@@ -244,6 +246,7 @@ function useSettingsInternal() {
     setCustomReasoningApiKey: store.setCustomReasoningApiKey,
     setDictationKey: store.setDictationKey,
     setMeetingKey: store.setMeetingKey,
+    setQuickNoteKey: store.setQuickNoteKey,
     setTheme: store.setTheme,
     activationMode: store.activationMode,
     setActivationMode: store.setActivationMode,
@@ -273,6 +276,8 @@ function useSettingsInternal() {
     setNoteFilesEnabled: store.setNoteFilesEnabled,
     noteFilesPath: store.noteFilesPath,
     setNoteFilesPath: store.setNoteFilesPath,
+    quickNotePrompt: store.quickNotePrompt,
+    setQuickNotePrompt: store.setQuickNotePrompt,
     cloudBackupEnabled: store.cloudBackupEnabled,
     setCloudBackupEnabled: store.setCloudBackupEnabled,
     telemetryEnabled: store.telemetryEnabled,

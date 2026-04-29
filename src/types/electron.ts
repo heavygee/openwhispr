@@ -362,6 +362,9 @@ declare global {
       onToggleDictation: (callback: () => void) => () => void;
       onStartDictation?: (callback: () => void) => () => void;
       onStopDictation?: (callback: () => void) => () => void;
+      onToggleQuickNote?: (callback: () => void) => () => void;
+      onStartQuickNote?: (callback: () => void) => () => void;
+      onStopQuickNote?: (callback: () => void) => () => void;
 
       // STT config
       getSttConfig?: () => Promise<{
@@ -889,6 +892,7 @@ declare global {
       getActiveDictationKey?: () => Promise<string>;
       getEffectiveDefaultHotkey?: () => Promise<string>;
       saveDictationKey?: (key: string) => Promise<void>;
+      getQuickNoteKey?: () => Promise<string | null>;
 
       // Activation mode persistence (file-based for reliable startup)
       getActivationMode?: () => Promise<"tap" | "push">;
@@ -938,6 +942,8 @@ declare global {
       notifyActivationModeChanged?: (mode: "tap" | "push") => void;
       notifyHotkeyChanged?: (hotkey: string) => void;
       registerMeetingHotkey?: (hotkey: string) => Promise<{ success: boolean; message?: string }>;
+      registerQuickNoteHotkey?: (hotkey: string) => Promise<{ success: boolean; message?: string }>;
+      saveQuickNoteKey?: (hotkey: string) => Promise<{ success: boolean }>;
       notifyFloatingIconAutoHideChanged?: (enabled: boolean) => void;
       onFloatingIconAutoHideChanged?: (callback: (enabled: boolean) => void) => () => void;
       notifyStartMinimizedChanged?: (enabled: boolean) => void;

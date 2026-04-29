@@ -29,6 +29,9 @@ contextBridge.exposeInMainWorld("electronAPI", {
   onToggleDictation: registerListener("toggle-dictation", (callback) => () => callback()),
   onStartDictation: registerListener("start-dictation", (callback) => () => callback()),
   onStopDictation: registerListener("stop-dictation", (callback) => () => callback()),
+  onToggleQuickNote: registerListener("toggle-quick-note", (callback) => () => callback()),
+  onStartQuickNote: registerListener("start-quick-note", (callback) => () => callback()),
+  onStopQuickNote: registerListener("stop-quick-note", (callback) => () => callback()),
 
   // Database functions
   saveTranscription: (text, rawText, options) =>
@@ -288,6 +291,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
   // Cleanup function
   cleanupApp: () => ipcRenderer.invoke("cleanup-app"),
   updateHotkey: (hotkey) => ipcRenderer.invoke("update-hotkey", hotkey),
+  registerQuickNoteHotkey: (hotkey) => ipcRenderer.invoke("register-quick-note-hotkey", hotkey),
+  saveQuickNoteKey: (hotkey) => ipcRenderer.invoke("save-quick-note-key", hotkey),
   setHotkeyListeningMode: (enabled, newHotkey) =>
     ipcRenderer.invoke("set-hotkey-listening-mode", enabled, newHotkey),
   getHotkeyModeInfo: () => ipcRenderer.invoke("get-hotkey-mode-info"),
@@ -394,6 +399,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
   getActiveDictationKey: () => ipcRenderer.invoke("get-active-dictation-key"),
   getEffectiveDefaultHotkey: () => ipcRenderer.invoke("get-effective-default-hotkey"),
   saveDictationKey: (key) => ipcRenderer.invoke("save-dictation-key", key),
+  getQuickNoteKey: () => ipcRenderer.invoke("get-quick-note-key"),
 
   // Activation mode persistence (file-based for reliable startup)
   getActivationMode: () => ipcRenderer.invoke("get-activation-mode"),

@@ -24,6 +24,7 @@ const PERSISTED_KEYS = [
   "DICTATION_KEY",
   "AGENT_KEY",
   "MEETING_KEY",
+  "QUICK_NOTE_KEY",
   "ACTIVATION_MODE",
   "FLOATING_ICON_AUTO_HIDE",
   "PANEL_START_POSITION",
@@ -262,6 +263,16 @@ class EnvironmentManager {
 
   saveMeetingKey(key) {
     const result = this._saveKey("MEETING_KEY", key);
+    this.saveAllKeysToEnvFile().catch(() => {});
+    return result;
+  }
+
+  getQuickNoteKey() {
+    return this._getKey("QUICK_NOTE_KEY");
+  }
+
+  saveQuickNoteKey(key) {
+    const result = this._saveKey("QUICK_NOTE_KEY", key);
     this.saveAllKeysToEnvFile().catch(() => {});
     return result;
   }

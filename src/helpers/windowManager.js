@@ -40,6 +40,7 @@ class WindowManager {
     this._agentAnimationState = null;
     this._panelStartPosition = "bottom-right";
     this._isDictatingToggle = false;
+    this._isQuickNoteToggle = false;
 
     app.on("before-quit", () => {
       this.isQuitting = true;
@@ -251,7 +252,47 @@ class WindowManager {
     };
   }
 
-  startMacCompoundPushToTalk(hotkey) {
+  createQuickNoteHotkeyCallback() {
+    let lastToggleTime = 0;
+    const DEBOUNCE_MS = 150;
+
+    return async () => {
+      if (this.hotkeyManager.isInListeningMode()) {
+        return;
+      }
+
+      const activationMode = this.getActivationMode();
+      const hotkey = this.hotkeyManager.getSlotHotkey?.("quick-note");
+
+      if (
+        process.platform === "darwin" &&
+        activationMode === "push" &&
+        hotkey &&
+        !isGlobeLikeHotkey(hotkey) &&
+        hotkey.includes("+")
+      ) {
+        this.startMacCompoundPushToTalk(hotkey, "quick-note");
+        return;
+      }
+
+      if (
+        (process.platform === "win32" || process.platform === "linux") &&
+        activationMode === "push"
+      ) {
+        return;
+      }
+
+      const now = Date.now();
+      if (now - lastToggleTime < DEBOUNCE_MS) {
+        return;
+      }
+      lastToggleTime = now;
+
+      this.sendToggleQuickNote();
+    };
+  }
+
+  startMacCompoundPushToTalk(hotkey, destination = "dictation") {
     if (this.macCompoundPushState?.active) {
       return;
     }
@@ -281,6 +322,7 @@ class WindowManager {
       isRecording: false,
       requiredModifiers,
       safetyTimeoutId,
+      destination,
     };
 
     setTimeout(() => {
@@ -290,7 +332,7 @@ class WindowManager {
 
       if (!this.macCompoundPushState.isRecording) {
         this.macCompoundPushState.isRecording = true;
-        this.sendStartDictation();
+        this.sendStartForDestination(this.macCompoundPushState.destination);
       }
     }, MIN_HOLD_DURATION_MS);
   }
@@ -309,10 +351,11 @@ class WindowManager {
     }
 
     const wasRecording = this.macCompoundPushState.isRecording;
+    const destination = this.macCompoundPushState.destination;
     this.macCompoundPushState = null;
 
     if (wasRecording) {
-      this.sendStopDictation();
+      this.sendStopForDestination(destination);
     } else {
       this.hideDictationPanel();
     }
@@ -328,10 +371,11 @@ class WindowManager {
     }
 
     const wasRecording = this.macCompoundPushState.isRecording;
+    const destination = this.macCompoundPushState.destination;
     this.macCompoundPushState = null;
 
     if (wasRecording) {
-      this.sendStopDictation();
+      this.sendStopForDestination(destination);
     }
     this.hideDictationPanel();
 
@@ -382,7 +426,7 @@ class WindowManager {
     return required;
   }
 
-  startWindowsPushToTalk() {
+  startWindowsPushToTalk(destination = "dictation") {
     if (this.winPushState?.active) {
       return;
     }
@@ -396,6 +440,7 @@ class WindowManager {
       active: true,
       downTime,
       isRecording: false,
+      destination,
     };
 
     setTimeout(() => {
@@ -405,7 +450,7 @@ class WindowManager {
 
       if (!this.winPushState.isRecording) {
         this.winPushState.isRecording = true;
-        this.sendStartDictation();
+        this.sendStartForDestination(this.winPushState.destination);
       }
     }, MIN_HOLD_DURATION_MS);
   }
@@ -416,10 +461,11 @@ class WindowManager {
     }
 
     const wasRecording = this.winPushState.isRecording;
+    const destination = this.winPushState.destination;
     this.winPushState = null;
 
     if (wasRecording) {
-      this.sendStopDictation();
+      this.sendStopForDestination(destination);
     } else {
       this.hideDictationPanel();
     }
@@ -445,6 +491,18 @@ class WindowManager {
     }
   }
 
+  sendToggleQuickNote() {
+    if (this.hotkeyManager.isInListeningMode()) {
+      return;
+    }
+    if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+      this.showDictationPanel();
+      this.mainWindow.webContents.send("toggle-quick-note");
+      this._isQuickNoteToggle = !this._isQuickNoteToggle;
+      this.meetingDetectionEngine?.setUserRecording(this._isQuickNoteToggle);
+    }
+  }
+
   sendStartDictation() {
     if (this.hotkeyManager.isInListeningMode()) {
       return;
@@ -452,6 +510,17 @@ class WindowManager {
     if (this.mainWindow && !this.mainWindow.isDestroyed()) {
       this.showDictationPanel();
       this.mainWindow.webContents.send("start-dictation");
+      this.meetingDetectionEngine?.setUserRecording(true);
+    }
+  }
+
+  sendStartQuickNote() {
+    if (this.hotkeyManager.isInListeningMode()) {
+      return;
+    }
+    if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+      this.showDictationPanel();
+      this.mainWindow.webContents.send("start-quick-note");
       this.meetingDetectionEngine?.setUserRecording(true);
     }
   }
@@ -464,6 +533,33 @@ class WindowManager {
       this.mainWindow.webContents.send("stop-dictation");
       this._isDictatingToggle = false;
       this.meetingDetectionEngine?.setUserRecording(false);
+    }
+  }
+
+  sendStopQuickNote() {
+    if (this.hotkeyManager.isInListeningMode()) {
+      return;
+    }
+    if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+      this.mainWindow.webContents.send("stop-quick-note");
+      this._isQuickNoteToggle = false;
+      this.meetingDetectionEngine?.setUserRecording(false);
+    }
+  }
+
+  sendStartForDestination(destination = "dictation") {
+    if (destination === "quick-note") {
+      this.sendStartQuickNote();
+    } else {
+      this.sendStartDictation();
+    }
+  }
+
+  sendStopForDestination(destination = "dictation") {
+    if (destination === "quick-note") {
+      this.sendStopQuickNote();
+    } else {
+      this.sendStopDictation();
     }
   }
 
