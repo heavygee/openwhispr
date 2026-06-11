@@ -1,0 +1,19 @@
+# Daily driver manifest — operator copy: ~/.config/openwhispr/driver-manifest.yaml
+# Rebuild: openwhispr-driver-rebuild [--verify] [--activate]
+#
+# worktrees/driver is READ-ONLY between rebuilds — only openwhispr-driver-rebuild may change it.
+# Layer order matters. Each layer merges into driver/integration on top of base.
+#
+# Fork branches must be rebased onto upstream/main before layering (or use a merge-train worktree).
+
+base: upstream/main
+
+layers:
+  # Fork customizations — enable after rebase onto upstream/main:
+  # - branch: feat/quick-spoken-note
+  #
+  # Upstream PRs (OpenWhispr/openwhispr):
+  # - pr: 835
+  #
+  # Fork branches on origin:
+  # - branch: origin/feat/some-fork-feature
